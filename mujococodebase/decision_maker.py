@@ -4,7 +4,7 @@ from typing import Mapping
 
 import numpy as np
 from mujococodebase.utils.math_ops import MathOps
-from mujococodebase.world.field import FIFAField, HLAdultField
+from mujococodebase.world.field import CustomField, FIFAField, HLAdultField
 from mujococodebase.world.play_mode import PlayModeEnum, PlayModeGroupEnum
 
 
@@ -37,6 +37,15 @@ class DecisionMaker:
             1: (7.0, 0.0, 0),
             2: (2.0, -1.5, 0),
             3: (2.0, 1.5, 0),
+        },
+        CustomField: {
+            1: (-25.0, 0.0, 0),
+            2: (-15.0, -12.0, 0),
+            3: (-15.0, 12.0, 0),
+            4: (0.0, -10.0, 0),
+            5: (0.0, 10.0, 0),
+            6: (15.0, -8.0, 0),
+            7: (15.0, 8.0, 0),
         }
     } 
 
