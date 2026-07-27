@@ -85,13 +85,61 @@ class DecisionMaker:
             self.is_getting_up = not self.agent.skills_manager.execute(skill_name="GetUp")
 
         elif self.agent.world.playmode is PlayModeEnum.PLAY_ON:
-            self.carry_ball()
+            if self.agent.world.number == 1:
+                self.goalkeeper()
+            else:
+                self.carry_ball()
         elif self.agent.world.playmode in (PlayModeEnum.BEFORE_KICK_OFF, PlayModeEnum.THEIR_GOAL, PlayModeEnum.OUR_GOAL):
             self.agent.skills_manager.execute("Neutral")
         else:
-            self.carry_ball()
+            if self.agent.world.number == 1:
+                self.goalkeeper()
+            else:
+                self.carry_ball()
 
         self.agent.robot.commit_motor_targets_pd()
+
+    def goalkeeper(self):
+        """
+        Goalkeeper behavior: stays near our goal and defends against shots.
+        """
+        our_goal_pos = self.agent.world.field.get_our_goal_position()[:2]
+        ball_pos = self.agent.world.ball_pos[:2]
+        my_pos = self.agent.world.global_position[:2]
+
+        field_width = self.agent.world.field.get_width()
+        field_length = self.agent.world.field.get_length()
+
+        goal_area_depth = 5.0
+        goal_area_width = 12.0
+
+        goal_left_x = our_goal_pos[0]
+        goal_left_y_min = -goal_area_width / 2
+        goal_left_y_max = goal_area_width / 2
+
+        target_x = goal_left_x + goal_area_depth
+        target_y = ball_pos[1]
+
+        target_y = np.clip(target_y, goal_left_y_min, goal_left_y_max)
+
+        ball_dist = np.linalg.norm(ball_pos - my_pos)
+
+        if ball_dist < 1.0:
+            ball_to_goal = our_goal_pos - ball_pos
+            bg_norm = np.linalg.norm(ball_to_goal)
+            if bg_norm > 0:
+                desired_orientation = MathOps.vector_angle(ball_to_goal)
+            else:
+                desired_orientation = 0
+        else:
+            desired_orientation = MathOps.vector_angle(ball_pos - my_pos)
+
+        self.agent.skills_manager.execute(
+            "Walk",
+            target_2d=(target_x, target_y),
+            is_target_absolute=True,
+            orientation=desired_orientation
+        )
 
     def carry_ball(self):
         """
