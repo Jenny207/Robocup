@@ -7,5 +7,5 @@ port=${2:-60000}
 PYTHON="./.venv/bin/python"
 
 for i in {1..7}; do
-  $PYTHON run_player.py --host $host --port $port -n $i -t MujocoCodebase &
+  $PYTHON run_player.py --host $host --port $port -n $i -t MujocoCodebase -f custom &
 done
