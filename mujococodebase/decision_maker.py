@@ -89,8 +89,20 @@ class DecisionMaker:
                 self.goalkeeper()
             else:
                 self.carry_ball()
-        elif self.agent.world.playmode in (PlayModeEnum.BEFORE_KICK_OFF, PlayModeEnum.THEIR_GOAL, PlayModeEnum.OUR_GOAL):
+
+        elif self.agent.world.playmode in (
+            PlayModeEnum.BEFORE_KICK_OFF,
+            PlayModeEnum.OUR_GOAL,
+            PlayModeEnum.THEIR_GOAL,
+        ):
             self.agent.skills_manager.execute("Neutral")
+        #敌方开球时的防守行为 ，避免犯规
+        elif self.agent.world.playmode_group is PlayModeGroupEnum.THEIR_KICK:
+            self.defend_kick()
+        #我方开球时执行进攻
+        elif self.agent.world.playmode_group is PlayModeGroupEnum.OUR_KICK:
+            self.execute_our_kick()
+
         else:
             if self.agent.world.number == 1:
                 self.goalkeeper()
@@ -140,6 +152,52 @@ class DecisionMaker:
             is_target_absolute=True,
             orientation=desired_orientation
         )
+
+    def defend_kick(self):
+        """
+        Defensive behavior when the opponent has a set play.
+        Players maintain a safe distance from the ball to avoid fouls.
+        """
+        if self.agent.world.number == 1:
+            self.goalkeeper()
+            return
+
+        ball_pos = self.agent.world.ball_pos[:2]
+        my_pos = self.agent.world.global_position[:2]
+
+        MIN_BALL_DISTANCE = 1.0
+
+        ball_to_me = my_pos - ball_pos
+        dist_to_ball = np.linalg.norm(ball_to_me)
+
+        if dist_to_ball < MIN_BALL_DISTANCE:
+            if dist_to_ball > 1e-6:
+                retreat_dir = ball_to_me / dist_to_ball
+            else:
+                retreat_dir = np.array([1.0, 0.0])
+
+            target_pos = ball_pos + retreat_dir * MIN_BALL_DISTANCE
+            desired_orientation = MathOps.vector_angle(ball_pos - my_pos)
+
+            self.agent.skills_manager.execute(
+                "Walk",
+                target_2d=target_pos,
+                is_target_absolute=True,
+                orientation=desired_orientation
+            )
+        else:
+            desired_orientation = MathOps.vector_angle(ball_pos - my_pos)
+            self.agent.skills_manager.execute("Neutral")
+
+    def execute_our_kick(self):
+        """
+        Behavior when our team has a set play.
+        Goalkeeper defends, field players approach the ball to restart play.
+        """
+        if self.agent.world.number == 1:
+            self.goalkeeper()
+        else:
+            self.carry_ball()
 
     def carry_ball(self):
         """
