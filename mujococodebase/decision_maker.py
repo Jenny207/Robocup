@@ -39,15 +39,15 @@ class DecisionMaker:
             3: (2.0, 1.5, 0),
         },
         CustomField: {
-            1: (-25.0, 0.0, 0),
-            2: (-15.0, -12.0, 0),
-            3: (-15.0, 12.0, 0),
-            4: (0.0, -10.0, 0),
-            5: (0.0, 10.0, 0),
-            6: (-15.0, -8.0, 0),
-            7: (-15.0, 8.0, 0),
-        }
-    } 
+            1: (-26, 0, 0), #守门员
+            2: (-10, 0, 0),
+            3: (-3, 10, 0),
+            4: (-2, 6, 0),
+            5: (-3, -10, 0),
+            6: (-2, -6, 0),
+            7: (-6, 0, 0),
+        },
+    }
 
     def __init__(self, agent):
         """
@@ -113,8 +113,9 @@ class DecisionMaker:
 
     def goalkeeper(self):
         """
-        Goalkeeper behavior: stays near our goal and defends against shots.
+        守门员行为：守在己方球门前方，根据球的位置移动并调整朝向以防守射门。
         """
+        # 获取己方球门位置、球位置和自身位置（仅取 x, y 二维坐标）
         our_goal_pos = self.agent.world.field.get_our_goal_position()[:2]
         ball_pos = self.agent.world.ball_pos[:2]
         my_pos = self.agent.world.global_position[:2]
@@ -122,30 +123,43 @@ class DecisionMaker:
         field_width = self.agent.world.field.get_width()
         field_length = self.agent.world.field.get_length()
 
-        goal_area_depth = 5.0
+        # 守门员活动区域参数：距球门线 1.5m，Y 轴覆盖范围 ±6m（共 12m）
+        goal_area_depth = 1.5
         goal_area_width = 12.0
 
+        # 球门线 X 坐标及守门员 Y 轴活动范围
         goal_left_x = our_goal_pos[0]
         goal_left_y_min = -goal_area_width / 2
         goal_left_y_max = goal_area_width / 2
 
+        # 目标位置：X 轴固定在球门前方 goal_area_depth 处，
+        # Y 轴跟随球的横向位置移动，并限制在球门宽度范围内
         target_x = goal_left_x + goal_area_depth
         target_y = ball_pos[1]
 
         target_y = np.clip(target_y, goal_left_y_min, goal_left_y_max)
 
+        # 计算守门员与球的距离，用于决定朝向策略
         ball_dist = np.linalg.norm(ball_pos - my_pos)
 
+        # 朝向策略：根据球与守门员的距离选择不同的朝向逻辑
         if ball_dist < 1.0:
+            # 近身威胁（球距 < 1.0m）：球已逼近球门，需要封堵射门角度
+            # 计算"球→球门"向量，守门员面向该方向以挡住射门路线
             ball_to_goal = our_goal_pos - ball_pos
             bg_norm = np.linalg.norm(ball_to_goal)
             if bg_norm > 0:
+                # 正常情况：将向量转换为角度作为目标朝向
                 desired_orientation = MathOps.vector_angle(ball_to_goal)
             else:
+                # 边界情况：球恰好在球门位置，朝向设为 0（面向 +X 方向）
                 desired_orientation = 0
         else:
+            # 远距离（球距 >= 1.0m）：球还未构成直接威胁
+            # 守门员面向球的方向，持续跟踪球的移动，为后续防守做准备
             desired_orientation = MathOps.vector_angle(ball_pos - my_pos)
 
+        # 执行 Walk 技能：移动到目标位置（绝对坐标），并调整朝向
         self.agent.skills_manager.execute(
             "Walk",
             target_2d=(target_x, target_y),
