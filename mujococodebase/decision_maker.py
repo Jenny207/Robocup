@@ -60,7 +60,7 @@ class DecisionMaker:
 
         self.agent: Agent = agent
         self.is_getting_up: bool = False
-
+    # 状态机：根据比赛状态和当前行为，决定下一步的行为
     def update_current_behavior(self) -> None:
         """
         Chooses what the agent should do in the current step.
@@ -68,10 +68,10 @@ class DecisionMaker:
         This function checks the game state and decides which behavior
         or skill should be executed next.
         """
-
+        # 状态1：比赛结束
         if self.agent.world.playmode is PlayModeEnum.GAME_OVER:
             return
-
+        # 状态2：Beam状态（开局站位，进球后复位）
         if self.agent.world.playmode_group in (
             PlayModeGroupEnum.ACTIVE_BEAM,
             PlayModeGroupEnum.PASSIVE_BEAM,
@@ -80,9 +80,18 @@ class DecisionMaker:
                 pos2d=self.BEAM_POSES[type(self.agent.world.field)][self.agent.world.number][:2],
                 rotation=self.BEAM_POSES[type(self.agent.world.field)][self.agent.world.number][2],
             )
-
+            return
+        #摔倒后站起
         if self.is_getting_up or self.agent.skills_manager.is_ready(skill_name="GetUp"):
             self.is_getting_up = not self.agent.skills_manager.execute(skill_name="GetUp")
+
+        # 赛前或进球后，原地待命，等待服务器分配站位 (Beam)
+        elif self.agent.world.playmode in (
+            PlayModeEnum.BEFORE_KICK_OFF,
+            PlayModeEnum.OUR_GOAL,
+            PlayModeEnum.THEIR_GOAL,
+        ):
+            self.agent.skills_manager.execute("Neutral")
 
         elif self.agent.world.playmode is PlayModeEnum.PLAY_ON:
             if self.agent.world.number == 1:
@@ -90,12 +99,6 @@ class DecisionMaker:
             else:
                 self.carry_ball()
 
-        elif self.agent.world.playmode in (
-            PlayModeEnum.BEFORE_KICK_OFF,
-            PlayModeEnum.OUR_GOAL,
-            PlayModeEnum.THEIR_GOAL,
-        ):
-            self.agent.skills_manager.execute("Neutral")
         #敌方开球时的防守行为 ，避免犯规
         elif self.agent.world.playmode_group is PlayModeGroupEnum.THEIR_KICK:
             self.defend_kick()
