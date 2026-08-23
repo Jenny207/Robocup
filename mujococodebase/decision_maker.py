@@ -99,18 +99,11 @@ class DecisionMaker:
             else:
                 self.carry_ball()
 
-        #敌方开球时的防守行为 ，避免犯规
-        elif self.agent.world.playmode_group is PlayModeGroupEnum.THEIR_KICK:
-            self.defend_kick()
-        #我方开球时执行进攻
-        elif self.agent.world.playmode_group is PlayModeGroupEnum.OUR_KICK:
-            self.execute_our_kick()
+        # 我方发球系列（开球、角球、任意球等）
+        elif self.agent.world.playmode_group == PlayModeGroupEnum.OUR_KICK:
 
-        else:
-            if self.agent.world.number == 1:
-                self.goalkeeper()
-            else:
-                self.carry_ball()
+            if self.agent.world.playmode is PlayModeEnum.OUR_KICK_OFF:
+                self.execute_kick_off()
 
         self.agent.robot.commit_motor_targets_pd()
 
@@ -170,51 +163,103 @@ class DecisionMaker:
             orientation=desired_orientation
         )
 
-    def defend_kick(self):
+     
+
+    def execute_kick_off(self):
         """
-        Defensive behavior when the opponent has a set play.
-        Players maintain a safe distance from the ball to avoid fouls.
+        我方开球行为：
+        - 守门员(1号)继续防守球门；
+        - 指定一名距球最近的非守门员球员（由初始站位决定）作为开球手，
+          靠近球并朝对方球门方向踢球；
+        - 其余非守门员球员移动到各自初始站位附近散开，准备接应，
+          同时保持在中圈外（不抢球）。
         """
-        if self.agent.world.number == 1:
+        my_number = self.agent.world.number
+
+        # 守门员不参与开球，继续执行防守逻辑
+        if my_number == 1:
             self.goalkeeper()
             return
 
         ball_pos = self.agent.world.ball_pos[:2]
         my_pos = self.agent.world.global_position[:2]
+        their_goal_pos = self.agent.world.field.get_their_goal_position()[:2]
 
-        MIN_BALL_DISTANCE = 1.0
+        # 根据初始站位确定开球手：除守门员外距球（原点）最近者
+        beam_poses = self.BEAM_POSES[type(self.agent.world.field)]
+        kicker_number = min(
+            (n for n in beam_poses if n != 1),
+            key=lambda n: np.linalg.norm(np.array(beam_poses[n][:2]))
+        )
 
-        ball_to_me = my_pos - ball_pos
-        dist_to_ball = np.linalg.norm(ball_to_me)
-
-        if dist_to_ball < MIN_BALL_DISTANCE:
-            if dist_to_ball > 1e-6:
-                retreat_dir = ball_to_me / dist_to_ball
-            else:
-                retreat_dir = np.array([1.0, 0.0])
-
-            target_pos = ball_pos + retreat_dir * MIN_BALL_DISTANCE
-            desired_orientation = MathOps.vector_angle(ball_pos - my_pos)
-
+        if my_number == kicker_number:
+            # 开球手：靠近球并朝对方球门方向踢球（复用带球进攻逻辑）
+            self.carry_ball()
+        else:
+            # 其余球员：回到各自初始站位附近散开，面向对方球门准备接应
+            target_2d = beam_poses[my_number][:2]
             self.agent.skills_manager.execute(
                 "Walk",
-                target_2d=target_pos,
+                target_2d=target_2d,
                 is_target_absolute=True,
-                orientation=desired_orientation
+                orientation=MathOps.vector_angle(their_goal_pos - my_pos),
+            )
+
+    def kick_ball(self):
+        """
+        开球手踢球行为（无专用踢球技能时，靠行走动量将球踢出）：
+        - 先移动到球后方并对准踢球方向；
+        - 对齐就位后，沿踢球方向短距离前冲，靠行走动量将球踢出进入比赛。
+        """
+        their_goal_pos = self.agent.world.field.get_their_goal_position()[:2]
+        ball_pos = self.agent.world.ball_pos[:2]
+        my_pos = self.agent.world.global_position[:2]
+
+        # 球→对方球门方向（即踢球方向）
+        ball_to_goal = their_goal_pos - ball_pos
+        bg_norm = np.linalg.norm(ball_to_goal)
+        if bg_norm == 0:
+            return
+        kick_dir = ball_to_goal / bg_norm
+
+        # 球后方站位点：在踢球方向反侧退后一段距离，确保踢球时朝向球门
+        stand_pos = ball_pos - kick_dir * 0.30
+
+        # 自身到球的方向与距离
+        my_to_ball = ball_pos - my_pos
+        my_to_ball_norm = np.linalg.norm(my_to_ball)
+        my_to_ball_dir = my_to_ball / my_to_ball_norm if my_to_ball_norm > 1e-6 else np.zeros(2)
+
+        # 对齐判定：自身→球 方向与踢球方向夹角足够小
+        cosang = np.clip(np.dot(my_to_ball_dir, kick_dir), -1.0, 1.0)
+        angle_diff = np.arccos(cosang)
+        ANGLE_TOL = np.deg2rad(10.0)
+
+        # 是否已在球后方（自身在踢球方向上位于球的后侧）
+        behind_ball = np.dot(my_pos - ball_pos, kick_dir) < 0
+
+        desired_orientation = MathOps.vector_angle(kick_dir)
+
+        if not behind_ball or angle_diff > ANGLE_TOL:
+            # 未就位：先走到球后方站位点并对准球门，准备踢球
+            self.agent.skills_manager.execute(
+                "Walk",
+                target_2d=stand_pos,
+                is_target_absolute=True,
+                orientation=desired_orientation,
             )
         else:
-            desired_orientation = MathOps.vector_angle(ball_pos - my_pos)
-            self.agent.skills_manager.execute("Neutral")
-
-    def execute_our_kick(self):
-        """
-        Behavior when our team has a set play.
-        Goalkeeper defends, field players approach the ball to restart play.
-        """
-        if self.agent.world.number == 1:
-            self.goalkeeper()
-        else:
-            self.carry_ball()
+            # 已就位：沿踢球方向短距离前冲，靠行走动量将球踢出进入比赛
+            # （开球只需把球触动/踢出即可，无需一路带到对方球门）
+            #在球的位置沿踢球方向（球→对方球门方向单位向量 kick_dir ）向前延伸 1.5m，
+            # 得到一个"球前方短距离点"作为行走终点。
+            kick_target = ball_pos + kick_dir * 1.5
+            self.agent.skills_manager.execute(
+                "Walk",
+                target_2d=kick_target,
+                is_target_absolute=True,
+                orientation=desired_orientation,
+            )
 
     def carry_ball(self):
         """
